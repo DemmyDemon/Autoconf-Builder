@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Autoconf Builder": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\Fredrik\\Documents\\ILC\\autoconfigure.yaml\""
+    }
+  }
+}
