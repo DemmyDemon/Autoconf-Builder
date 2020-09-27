@@ -82,64 +82,45 @@ namespace Autoconf_Builder
         {
             foreach (AutoconfHandler handler in data.handlers.Values)
             {
-                SwapDictionaryFileWithLua(handler.start, dirName);
-                SwapDictionaryFileWithLua(handler.stop, dirName);
-                SwapDictionaryFileWithLua(handler.flush, dirName);
-                SwapDictionaryFileWithLua(handler.update, dirName);
-                SwapActionListFileWithLua(handler.actionStart, dirName);
-                SwapActionListFileWithLua(handler.actionStop, dirName);
-                SwapActionListFileWithLua(handler.actionLoop, dirName);
-            }
-        }
+                foreach (AutoconfFilter filter in handler.filters)
+                {
+                    if (filter.file != null && filter.file.Length > 0)
+                    {
+                        if (filter.lua.Length > 0)
+                        {
+                            filter.lua += Environment.NewLine;
+                        }
+                        filter.lua += SlurpFile(dirName + '\\' + filter.file);
+                    }
+                    filter.file = null;
 
-        static void SwapDictionaryFileWithLua(Dictionary<string, string> where, string dirName)
-        {
-            if (where == null){ return; }
-            string fileName;
-            if (where.TryGetValue("file", out fileName)){
-                string fullFileName = dirName+'\\'+fileName;
-                string lua = SlurpFile(fullFileName);
-                if (where.ContainsKey("lua"))
-                {
-                    Console.WriteLine("WARNING: LUA ALREADY PRESENT WHEN INJECTING FILE!");
-                    where["lua"] += Environment.NewLine + lua;
-                }
-                else
-                {
-                    where["lua"] = lua;
-                }
-            }
-            where.Remove("file");
-        }
-        static void SwapActionListFileWithLua(List<AutoconfAction> where, string dirName)
-        {
-            if (where == null)
-            {
-                return;
-            }
-            foreach (AutoconfAction thisAction in where)
-            {
-                if (thisAction.file == null) { continue; }
-                string lua = SlurpFile(dirName + '\\' + thisAction.file);
-                thisAction.file = null;
-                if (thisAction.lua == null)
-                {
-                    thisAction.lua = lua;
-                }
-                else
-                {
-                    Console.WriteLine("WARNING: LUA ALREADY PRESENT WHEN INJECTING FILE INTO ACTION!");
-                    thisAction.lua += Environment.NewLine + lua;
+                    if (filter.files != null && filter.files.Count > 0)
+                    {
+                        foreach (string fileName in filter.files)
+                        {
+                            if (filter.lua.Length > 0)
+                            {
+                                filter.lua = Regex.Replace(filter.lua, @"\r?\n$", string.Empty);
+                                filter.lua += Environment.NewLine;
+                            }
+                            filter.lua += SlurpFile(dirName + '\\' + fileName);
+                        }
+                    }
+                    filter.files = null;
+
+                    if (filter.args.Count == 0)
+                    {
+                        filter.args = null;
+                    }
                 }
             }
         }
-        
         static string SlurpFile(string fileName)
         {
             if (File.Exists(fileName))
             {
                 string contents = File.ReadAllText(fileName);
-                contents = Regex.Replace(contents, @"^\s*", string.Empty, RegexOptions.Multiline); // Remove indentation
+                // contents = Regex.Replace(contents, @"^\s*", string.Empty, RegexOptions.Multiline); // Remove indentation
                 contents = Regex.Replace(contents, @"^--.*$", string.Empty, RegexOptions.Multiline); // Remove comments
                 contents = Regex.Replace(contents, @"^\s*$[\r?\n]*", string.Empty, RegexOptions.Multiline); // Remove empty lines
                 contents = Regex.Replace(contents, @"\s*$", string.Empty, RegexOptions.Multiline); // Remove trailing whitepace
@@ -157,7 +138,6 @@ namespace Autoconf_Builder
         {
             StreamReader fileContents = File.OpenText(fileName);
             var deserializer = new DeserializerBuilder()
-                //.WithNamingConvention(CamelCaseNamingConvention.Instance)
                 .Build();
             var data = deserializer.Deserialize<Autoconf>(fileContents);
             fileContents.Close();
@@ -180,14 +160,7 @@ namespace Autoconf_Builder
         }
         public class AutoconfHandler : IYamlConvertible
         {
-            public Dictionary<string, string> start { get; set; } = new Dictionary<string, string>();
-            public Dictionary<string, string> stop { get; set; } = new Dictionary<string, string>();
-            public Dictionary<string, string> flush { get; set; } = new Dictionary<string, string>();
-            public Dictionary<string, string> update { get; set; } = new Dictionary<string, string>();
-            public List<AutoconfAction> actionStart { get; set; } = new List<AutoconfAction>();
-            public List<AutoconfAction> actionStop { get; set; } = new List<AutoconfAction>();
-            public List<AutoconfAction> actionLoop { get; set; } = new List<AutoconfAction>();
-
+            public List<AutoconfFilter> filters { get; set; } = new List<AutoconfFilter>();
             public void Read(IParser parser, Type expectedType, ObjectDeserializer nestedObjectDeserializer)
             {
 
@@ -195,37 +168,9 @@ namespace Autoconf_Builder
                 Scalar node;
                 while (parser.TryConsume(out node))
                 {
-                    // Console.WriteLine(node);
-                    switch (node.Value)
-                    {
-                        case "start":
-                            start = (Dictionary<string, string>)nestedObjectDeserializer(start.GetType());
-                            break;
-                        case "stop":
-                            stop = (Dictionary<string, string>)nestedObjectDeserializer(stop.GetType());
-                            break;
-                        case "flush":
-                            flush = (Dictionary<string, string>)nestedObjectDeserializer(flush.GetType());
-                            break;
-                        case "update":
-                            update = (Dictionary<string, string>)nestedObjectDeserializer(update.GetType());
-                            break;
-                        case "actionStart":
-                            AutoconfAction actionStartNode = (AutoconfAction)nestedObjectDeserializer(typeof(AutoconfAction));
-                            actionStart.Add(actionStartNode);
-                            break;
-                        case "actionStop":
-                            AutoconfAction actionStopNode = (AutoconfAction)nestedObjectDeserializer(typeof(AutoconfAction));
-                            actionStop.Add(actionStopNode);
-                            break;
-                        case "actionLoop":
-                            AutoconfAction actionLoopNode = (AutoconfAction)nestedObjectDeserializer(typeof(AutoconfAction));
-                            actionLoop.Add(actionLoopNode);
-                            break;
-                        default:
-                            throw new NotImplementedException($"I have no idea what to do with {node.Value} nodes");
-
-                    }
+                    AutoconfFilter thisFilter = (AutoconfFilter)nestedObjectDeserializer(typeof(AutoconfFilter));
+                    thisFilter.name = node.Value;
+                    filters.Add(thisFilter);
                 }
                 parser.Consume<MappingEnd>();
 
@@ -234,38 +179,25 @@ namespace Autoconf_Builder
             public void Write(IEmitter emitter, ObjectSerializer nestedObjectSerializer)
             {
                 emitter.Emit(new MappingStart(null, null, true, MappingStyle.Block));
-                foreach (var tag in new string[4]{ "start", "stop", "flush", "update" }){
-                    var dict = (Dictionary<string, string>) this.GetType().GetProperty(tag).GetValue(this, null);
-                    
-                    if (dict == null) { continue; }
-                    if (dict.Count == 0) { continue; }
-
-                    emitter.Emit(new Scalar(tag));
-                    nestedObjectSerializer(dict, dict.GetType());
-                }
-                foreach (var action in new string[3] { "actionStart", "actionStop", "actionLoop" })
+                foreach(AutoconfFilter filter in filters)
                 {
-                    var list = (List<AutoconfAction>)this.GetType().GetProperty(action).GetValue(this, null);
-
-                    if (list == null) { continue; }
-                    if (list.Count == 0) { continue; }
-
-                    foreach (var thisAction in list) {
-                        emitter.Emit(new Scalar(action));
-                        nestedObjectSerializer(thisAction, thisAction.GetType());
-                    }
+                    emitter.Emit(new Scalar(filter.name));
+                    nestedObjectSerializer(filter, typeof(AutoconfFilter));
                 }
                 emitter.Emit(new MappingEnd());
             }
         }
-
-        public class AutoconfAction
+        public class AutoconfFilter
         {
-            public List<string> args { get; set; }
-
             [YamlMember(ScalarStyle = ScalarStyle.Literal)]
-            public string lua { get; set; }
+            public string lua { get; set; } = "";
+
+            [YamlIgnore]
+            public string name { get; set; } = "unknown";
+
+            public List<string> args { get; set; } = new List<string>();
             public string file { get; set; }
+            public List<string> files { get; set; }
         }
     }
 }
